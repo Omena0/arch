@@ -2,7 +2,7 @@
 ; ========================
 ; Common functions for user programs
 ;
-; Include with: .include "stdlib.asm"
+; Include with: #include "stdlib.asm"
 ;
 ; Calling Convention:
 ;   R0-R3: Arguments and return values
@@ -18,28 +18,20 @@
 ;   Use 'leab' (load effective address - byte) for data labels like strings.
 ;   Example: leab r2, my_string
 ;
-; Syscall Numbers:
+; Syscall Numbers (Fr Kernel):
 ;   0 = exit(code)          - R2 = exit code
 ;   1 = putchar(char)       - R2 = character
 ;   2 = getchar()           - R0 = character
 ;   3 = print_int(val)      - R2 = value (decimal)
-;   4 = newline()           - Print newline
-;   5 = print_hex(val)      - R2 = value (hex)
-;   6 = print_str(addr)     - R2 = string address
-;   7 = input_ready()       - R0 = 1 if input ready
-;   8 = random()            - R0 = random value
-;   9 = timer_lo()          - R0 = timer low word
-;  10 = timer_hi()          - R0 = timer high word
-;  11 = flush()             - Flush stdout
-;  12 = clear_screen()      - Clear screen
-;  13 = screen_flush()      - Update screen display
-;  14 = screen_putc()       - R2=char, R3=x, R4=y, R5=color
-;  15 = screen_setxy()      - R2=x, R3=y
-;  16 = screen_getc()       - R2=x, R3=y -> R0=char|color
-;  17 = kb_available()      - R0 = 1 if key ready
-;  18 = kb_read()           - R0 = key event
-;  19 = mouse_getxy()       - R0=x, R1=y
-;  20 = mouse_buttons()     - R0 = button state
+;   4 = time_lo()           - R0 = timer low word
+;   5 = time_hi()           - R0 = timer high word
+;   6 = random()            - R0 = random value
+;   7 = fork()              - R0 = child PID (parent), -1 (child)
+;   8 = wait(pid)           - R2 = PID to wait for
+;   9 = newline()           - Print newline
+;  10 = print_hex(val)      - R2 = value (hex)
+;  11 = print_str(addr)     - R2 = string address
+;  12 = yield()             - Yield to scheduler
 
 ; ============================================================================
 ; I/O Functions
@@ -109,7 +101,7 @@ putln:
 ; Clobbers: R1
 newline:
     push r7
-    mov r1, #4
+    mov r1, #9
     syscall
     pop r7
     ret
@@ -128,7 +120,7 @@ print_int:
 ; Clobbers: R1
 print_hex:
     push r7
-    mov r1, #5
+    mov r1, #10
     syscall
     pop r7
     ret
@@ -143,19 +135,13 @@ getc:
     pop r7
     ret
 
-; input_ready - Check if input is available
-; Output: R0 = 1 if input available, 0 otherwise
-; Clobbers: R1
-input_ready:
-    push r7
-    mov r1, #7
-    syscall
-    pop r7
-    ret
+; input_ready - Removed (not available in new kernel)
+; Use getc(blocking) instead
 
-; flush - Flush output buffer
+; print_str - Print a null-terminated string
+; Input: R2 = pointer to string (byte address from leab)
 ; Clobbers: R1
-flush:
+print_str:
     push r7
     mov r1, #11
     syscall
@@ -183,6 +169,40 @@ exit0:
     halt
 
 ; ============================================================================
+; Process Management
+; ============================================================================
+
+; fork - Create a child process
+; Output: R0 = child PID (0 for child, > 0 for parent, -1 on error)
+; Clobbers: R1
+fork:
+    push r7
+    mov r1, #7
+    syscall
+    pop r7
+    ret
+
+; wait - Wait for child process
+; Input: R2 = PID to wait for (or 0 for any)
+; Output: R0 = exit status
+; Clobbers: R1
+wait:
+    push r7
+    mov r1, #8
+    syscall
+    pop r7
+    ret
+
+; yield - Yield execution to scheduler
+; Clobbers: R1
+yield:
+    push r7
+    mov r1, #12
+    syscall
+    pop r7
+    ret
+
+; ============================================================================
 ; Random Number Generation
 ; ============================================================================
 
@@ -191,7 +211,7 @@ exit0:
 ; Clobbers: R1
 rand:
     push r7
-    mov r1, #8
+    mov r1, #6
     syscall
     pop r7
     ret
@@ -203,7 +223,7 @@ rand:
 rand_range:
     push r7
     mov r3, r2              ; Save max in R3 (R4/R5 clobbered)
-    mov r1, #8              ; syscall random
+    mov r1, #6              ; syscall random
     syscall
     ; R0 = R0 % R3 (modulo)
     ; Simple modulo: subtract until < max
@@ -225,7 +245,7 @@ rand_range_done:
 ; Clobbers: R1
 timer_lo:
     push r7
-    mov r1, #9
+    mov r1, #4
     syscall
     pop r7
     ret
@@ -235,7 +255,7 @@ timer_lo:
 ; Clobbers: R1
 timer_hi:
     push r7
-    mov r1, #10
+    mov r1, #5
     syscall
     pop r7
     ret

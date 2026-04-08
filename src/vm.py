@@ -67,6 +67,7 @@ os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
 import select
 import time
 import random
+import struct
 try:
     import pygame
 except ImportError:
@@ -76,69 +77,86 @@ from collections import deque
 from executable import Executable, MicroOp
 
 
+def float_to_u32(f: float) -> int:
+    """Convert Python float to 32-bit IEEE 754 unsigned integer."""
+    try:
+        return struct.unpack('<I', struct.pack('<f', f))[0]
+    except:
+        return 0
+
+
+def u32_to_float(u: int) -> float:
+    """Convert 32-bit IEEE 754 unsigned integer to Python float."""
+    try:
+        return struct.unpack('<f', struct.pack('<I', u & 0xFFFFFFFF))[0]
+    except:
+        return 0.0
+
+
 # Memory-mapped I/O addresses
-MMIO_BASE = 0x0000
+MMIO_BASE = 0xFF00  # Main MMIO window
 
 # Character I/O
-MMIO_PRINT_CHAR   = 0x0000
-MMIO_PRINT_INT    = 0x0002
-MMIO_PRINT_HEX    = 0x0004
-MMIO_PRINT_STR    = 0x0006
-MMIO_INPUT_CHAR   = 0x0008
-MMIO_INPUT_READY  = 0x000A
-MMIO_INPUT_LINE   = 0x000C
-MMIO_NEWLINE      = 0x000E
+MMIO_PRINT_CHAR   = 0xFF00
+MMIO_PRINT_INT    = 0xFF02
+MMIO_PRINT_HEX    = 0xFF04
+MMIO_PRINT_STR    = 0xFF06
+MMIO_INPUT_CHAR   = 0xFF08
+MMIO_INPUT_READY  = 0xFF0A
+MMIO_INPUT_LINE   = 0xFF0C
+MMIO_NEWLINE      = 0xFF0E
 
 # Timer
-MMIO_TIMER_LO     = 0x0010
-MMIO_TIMER_HI     = 0x0012
-MMIO_TIMER_INTERVAL = 0x0014
-MMIO_RANDOM       = 0x0016
-MMIO_EXIT         = 0x0018
-MMIO_SCREEN_CLEAR = 0x001C
-MMIO_FLUSH        = 0x001E
+MMIO_TIMER_LO     = 0xFF10
+MMIO_TIMER_HI     = 0xFF12
+MMIO_TIMER_INTERVAL = 0xFF36
+MMIO_RANDOM       = 0xFF14
+MMIO_EXIT         = 0xFF18
+MMIO_TIME         = 0xFF1A          # Read: current time as 32-bit float (seconds since epoch)
+MMIO_SCREEN_CLEAR = 0xFF1C
+MMIO_FLUSH        = 0xFF1E
 
 # File I/O
-MMIO_FILE_OPEN    = 0x0020
-MMIO_FILE_READ    = 0x0022
-MMIO_FILE_CLOSE   = 0x0024
-MMIO_FILE_SIZE    = 0x0026
-MMIO_FILE_SEEK    = 0x0028
+MMIO_FILE_OPEN    = 0xFF20
+MMIO_FILE_READ    = 0xFF22
+MMIO_FILE_CLOSE   = 0xFF24
+MMIO_FILE_SIZE    = 0xFF26
+MMIO_FILE_SEEK    = 0xFF28
 
 # Arguments
-MMIO_ARG_COUNT    = 0x0030
-MMIO_ARG_LEN      = 0x0032
-MMIO_ARG_COPY     = 0x0034
+MMIO_ARG_COUNT    = 0xFF30
+MMIO_ARG_LEN      = 0xFF32
+MMIO_ARG_COPY     = 0xFF34
 
 # Screen (80x25 text mode)
-MMIO_SCREEN_WIDTH  = 0x0040
-MMIO_SCREEN_HEIGHT = 0x0042
-MMIO_SCREEN_PUTC   = 0x0044
-MMIO_SCREEN_SETXY  = 0x0046
-MMIO_SCREEN_FLUSH  = 0x0048
-MMIO_SCREEN_GETC   = 0x004A
-MMIO_SCREEN_BUF    = 0x004C
+MMIO_SCREEN_WIDTH  = 0xFF40
+MMIO_SCREEN_HEIGHT = 0xFF42
+MMIO_SCREEN_PUTC   = 0xFF44
+MMIO_SCREEN_SETXY  = 0xFF46
+MMIO_SCREEN_FLUSH  = 0xFF48
+MMIO_SCREEN_GETC   = 0xFF4A
+MMIO_SCREEN_BUF    = 0xFF4C
 
 # Keyboard / Mouse
-MMIO_KB_AVAILABLE  = 0x0050
-MMIO_KB_READ       = 0x0052
-MMIO_KB_MODIFIERS  = 0x0054
-MMIO_MOUSE_X       = 0x0060
-MMIO_MOUSE_Y       = 0x0062
-MMIO_MOUSE_BUTTONS = 0x0064
-MMIO_MOUSE_WHEEL   = 0x0066
+MMIO_KB_AVAILABLE  = 0xFF50
+MMIO_KB_READ       = 0xFF52
+MMIO_KB_MODIFIERS  = 0xFF54
+MMIO_MOUSE_X       = 0xFF60
+MMIO_MOUSE_Y       = 0xFF62
+MMIO_MOUSE_BUTTONS = 0xFF64
+MMIO_MOUSE_WHEEL   = 0xFF66
 
 # Process Control
-MMIO_SET_PROC_BASE  = 0x0070
-MMIO_SET_PROC_LIMIT = 0x0072
+MMIO_SET_PROC_BASE  = 0xFF3C
+MMIO_SET_PROC_LIMIT = 0xFF3E
 
 # Kernel / Trap Constants
 KERNEL_LOAD_ADDR    = 0x0100  # Start of kernel code
 TRAP_VECTOR         = 0x0100  # Jump here on trap
-TRAP_INFO_CAUSE     = 0x0080
-TRAP_INFO_ADDR      = 0x0082 
-TRAP_INFO_PC        = 0x0084 
-TRAP_INFO_VALUE     = 0x0086
+TRAP_INFO_CAUSE     = 0x0010
+TRAP_INFO_ADDR      = 0x0014
+TRAP_INFO_PC        = 0x0018
+TRAP_INFO_VALUE     = 0x001C
 
 # MMIO Region End (Exclusive)
 MMIO_END            = 0x0100
@@ -150,6 +168,10 @@ TRAP_INVALID_OP   = 0x0003  # Invalid operation
 TRAP_DIV_ZERO     = 0x0004  # Division by zero
 TRAP_TIMER        = 0x0005  # Timer interrupt
 TRAP_MEM_VIOLATION = 0x0006  # Memory protection violation
+TRAP_SYSCALL      = 0x0007  # User syscall (via dedicated MMIO address)
+
+# User-accessible MMIO (high area - separate from kernel trap region)
+MMIO_SYSCALL        = 0xFF80  # User program writes here to trigger syscall trap
 
 
 class VM:
@@ -182,6 +204,7 @@ class VM:
         self.halted = False
         self.cycles = 0
         self.exit_code = None  # Set by MMIO_EXIT
+        self.trap_taken = False
 
         # Debug options
         self.trace = False
@@ -204,6 +227,7 @@ class VM:
         # Screen support (80x25 text mode)
         self.screen_width = 80
         self.screen_height = 25
+
         # Screen buffer: each cell is (char, color) where color is 0-255 (fg*16+bg)
         self.screen_buffer = [[(' ', 0x07) for _ in range(self.screen_width)] for _ in range(self.screen_height)]
         self.cursor_x = 0
@@ -234,60 +258,108 @@ class VM:
     def trap(self, cause: int, fault_addr: int, value: int = 0):
         """Trigger a trap - write info to kernel memory and jump to trap vector."""
         if self.debug:
-            cause_names = {1: "MMIO_READ", 2: "MMIO_WRITE", 5: "TIMER", 6: "MEM_VIOLATION"}
+            cause_names = {1: "MMIO_READ", 2: "MMIO_WRITE", 5: "TIMER", 6: "MEM_VIOLATION", 7: "SYSCALL"}
             cause_name = cause_names.get(cause, f"UNKNOWN({cause})")
-            print(f"TRAP: {cause_name} addr=0x{fault_addr:04X} value=0x{value:04X}")
+            print(f"TRAP: {cause_name} addr=0x{fault_addr:04X} value=0x{value:08X}")
 
-        # Write trap info to kernel memory area
+        # Write trap info to kernel memory area as full 32-bit values.
         self.memory[TRAP_INFO_CAUSE] = cause & 0xFF
         self.memory[TRAP_INFO_CAUSE + 1] = (cause >> 8) & 0xFF
+        self.memory[TRAP_INFO_CAUSE + 2] = (cause >> 16) & 0xFF
+        self.memory[TRAP_INFO_CAUSE + 3] = (cause >> 24) & 0xFF
+
         self.memory[TRAP_INFO_ADDR] = fault_addr & 0xFF
         self.memory[TRAP_INFO_ADDR + 1] = (fault_addr >> 8) & 0xFF
+        self.memory[TRAP_INFO_ADDR + 2] = (fault_addr >> 16) & 0xFF
+        self.memory[TRAP_INFO_ADDR + 3] = (fault_addr >> 24) & 0xFF
+
         self.memory[TRAP_INFO_PC] = self.pc & 0xFF
         self.memory[TRAP_INFO_PC + 1] = (self.pc >> 8) & 0xFF
+        self.memory[TRAP_INFO_PC + 2] = (self.pc >> 16) & 0xFF
+        self.memory[TRAP_INFO_PC + 3] = (self.pc >> 24) & 0xFF
+
         self.memory[TRAP_INFO_VALUE] = value & 0xFF
         self.memory[TRAP_INFO_VALUE + 1] = (value >> 8) & 0xFF
+        self.memory[TRAP_INFO_VALUE + 2] = (value >> 16) & 0xFF
+        self.memory[TRAP_INFO_VALUE + 3] = (value >> 24) & 0xFF
 
         # Save registers R0-R7 to 0x0060 (Kernel Temp / Trap Frame)
-        # This allows the kernel to restore clobbered registers
+        # Now saves 32-bit registers (4 bytes each)
         trap_regs_base = 0x0060
         for i in range(8):
-            val = self.regs[i]
-            self.memory[trap_regs_base + i*2] = val & 0xFF
-            self.memory[trap_regs_base + i*2 + 1] = (val >> 8) & 0xFF
+            val = self.regs[i] & 0xFFFFFFFF
+            self.memory[trap_regs_base + i*4] = val & 0xFF
+            self.memory[trap_regs_base + i*4 + 1] = (val >> 8) & 0xFF
+            self.memory[trap_regs_base + i*4 + 2] = (val >> 16) & 0xFF
+            self.memory[trap_regs_base + i*4 + 3] = (val >> 24) & 0xFF
 
         # Enter privileged mode and jump to trap vector
         self.privileged = True
-        # Reset process memory bounds to allow full kernel access
-        self.process_mem_base = 0x0000
-        self.process_mem_limit = 0x10000
         self.pc = TRAP_VECTOR
+        self.trap_taken = True
 
     def load(self, exe: Executable):
-        """Load executable into memory."""
-        # Load kernel at KERNEL_LOAD_ADDR
-        load_addr = KERNEL_LOAD_ADDR
+        """Load executable into memory.
         
-        # Load code into memory (variable-size instructions)
-        # Build byte-offset-to-instruction map for cached code
-        self.code_map = {}  # byte_offset -> MicroOp
+        Supported image layouts:
+        - Kernel image: entry_point >= 0x0100, all code loaded at 0x0100.
+        - User image: entry_point < 0x0100 and no embedded kernel section.
+        - Mixed image: user+kernel in one code stream, split by kernel_size boundary.
+        """
+        total_code_bytes = sum(op.size() for op in exe.code)
+        is_kernel_image = exe.entry_point >= KERNEL_LOAD_ADDR
+        has_embedded_kernel = (not is_kernel_image) and (0 < exe.kernel_size < total_code_bytes)
 
-        byte_offset = 0
-        current_phys_addr = load_addr
+        user_ops = []
+        kernel_ops = []
 
-        for op in exe.code:
+        if is_kernel_image:
+            kernel_ops = exe.code
+        elif has_embedded_kernel:
+            byte_offset = 0
+            kernel_start_idx = len(exe.code)
+            for i, op in enumerate(exe.code):
+                if byte_offset >= exe.kernel_size:
+                    kernel_start_idx = i
+                    break
+                byte_offset += op.size()
+            user_ops = exe.code[:kernel_start_idx]
+            kernel_ops = exe.code[kernel_start_idx:]
+        else:
+            user_ops = exe.code
+
+        # Load user code starting at address 0x0000.
+        self.code_map = {}
+        current_phys_addr = 0x0000
+        for op in user_ops:
             self.code_map[current_phys_addr] = op
             data = op.encode()
             
             if current_phys_addr + len(data) > self.memory_size:
-                raise MemoryError("Kernel code too large for memory")
+                raise MemoryError("User code too large for memory")
                 
             self.memory[current_phys_addr:current_phys_addr+len(data)] = data
-            byte_offset += len(data)
             current_phys_addr += len(data)
+        
+        user_code_end = current_phys_addr
 
-        # Load data after code
-        data_start = current_phys_addr
+        # Load kernel code starting at KERNEL_LOAD_ADDR (0x0100) when present.
+        kernel_code_end = KERNEL_LOAD_ADDR
+        if kernel_ops:
+            current_phys_addr = KERNEL_LOAD_ADDR
+            for op in kernel_ops:
+                self.code_map[current_phys_addr] = op
+                data = op.encode()
+
+                if current_phys_addr + len(data) > self.memory_size:
+                    raise MemoryError("Kernel code too large for memory")
+
+                self.memory[current_phys_addr:current_phys_addr+len(data)] = data
+                current_phys_addr += len(data)
+            kernel_code_end = current_phys_addr
+
+        # Load data after whichever code section is last.
+        data_start = kernel_code_end if kernel_ops else user_code_end
         if data_start + len(exe.data) > self.memory_size:
              raise MemoryError("Kernel data too large for memory")
              
@@ -296,16 +368,17 @@ class VM:
         # Store code for reference
         self.code = exe.code
         
-        # Calculate kernel end
-        self.kernel_size = data_start + len(exe.data)
+        # Kernel boundary controls privilege escalation on PC writes.
+        # For user-only images, keep it at 0 to avoid treating user code as kernel.
+        self.kernel_size = kernel_code_end if kernel_ops else 0x0000
 
-        # Entry point is a byte address
+        # Entry point is a byte address (should be 0x0000 for user code)
         self.pc = exe.entry_point
 
-        # Clear the kernel data/trap area (0x0010-0x00FF) so flags/boot markers start at 0
-        # Don't clear 0x0000-0x000F which contains the trap vector (kernel entry point)
-        for i in range(0x0010, min(self.memory_size, 0x0100)):
-            self.memory[i] = 0
+        # Clear trap metadata area for kernel-backed images.
+        if kernel_ops:
+            for i in range(0x0010, min(self.memory_size, 0x0100)):
+                self.memory[i] = 0
 
     def fetch(self) -> tuple[MicroOp, int]:
         """Fetch micro-op at current PC (byte address). Returns (MicroOp, size_in_bytes)."""
@@ -342,10 +415,9 @@ class VM:
 
     def update_flags(self, result: int):
         """Update Z and N flags from result."""
-        # Use 16-bit result for flag computation
-        result_16 = result & 0xFFFF
-        self.flag_z = (result_16 == 0)
-        self.flag_n = bool(result_16 & 0x8000)
+        result_32 = result & 0xFFFFFFFF
+        self.flag_z = (result_32 == 0)
+        self.flag_n = bool(result_32 & 0x80000000)
 
     def check_condition(self, op: MicroOp) -> bool:
         """Check if conditional execution should proceed."""
@@ -359,9 +431,9 @@ class VM:
 
     def alu_execute(self, op: MicroOp, src_a: int, src_b: int) -> int:
         """Execute ALU operation and return result."""
-        # All operations work on 16-bit values
-        src_a &= 0xFFFF
-        src_b &= 0xFFFF
+        # All operations work on 32-bit values
+        src_a &= 0xFFFFFFFF
+        src_b &= 0xFFFFFFFF
 
         alu_op = op.alu_op
 
@@ -372,9 +444,9 @@ class VM:
         elif alu_op == 2:  # SELECT B
             return src_b
         elif alu_op == 3:  # ADD
-            return (src_a + src_b) & 0xFFFF
+            return (src_a + src_b) & 0xFFFFFFFF
         elif alu_op == 4:  # SUB
-            return (src_a - src_b) & 0xFFFF
+            return (src_a - src_b) & 0xFFFFFFFF
         elif alu_op == 5:  # AND
             return src_a & src_b
         elif alu_op == 6:  # OR
@@ -382,85 +454,122 @@ class VM:
         elif alu_op == 7:  # XOR
             return src_a ^ src_b
         elif alu_op == 8:  # SHL A
-            return (src_a << (src_b & 0xF)) & 0xFFFF
-        elif alu_op == 9:  # SHR A
-            return (src_a >> (src_b & 0xF)) & 0xFFFF
+            return (src_a << (src_b & 0x1F)) & 0xFFFFFFFF
+        elif alu_op == 9:  # SHR A (logical right shift)
+            return (src_a >> (src_b & 0x1F)) & 0xFFFFFFFF
         elif alu_op == 10: # INC A
-            return (src_a + 1) & 0xFFFF
+            return (src_a + 1) & 0xFFFFFFFF
         elif alu_op == 11: # DEC A
-            return (src_a - 1) & 0xFFFF
+            return (src_a - 1) & 0xFFFFFFFF
         elif alu_op == 12: # MUL
-            return (src_a * src_b) & 0xFFFF
+            return (src_a * src_b) & 0xFFFFFFFF
         elif alu_op == 13: # DIV
             if src_b == 0:
-                return 0xFFFF  # Division by zero returns max
-            return (src_a // src_b) & 0xFFFF
+                return 0xFFFFFFFF  # Division by zero returns max
+            return (src_a // src_b) & 0xFFFFFFFF
         elif alu_op == 14: # ROL A
-            shift = src_b & 0xF
-            return ((src_a << shift) | (src_a >> (16 - shift))) & 0xFFFF
+            shift = src_b & 0x1F
+            return ((src_a << shift) | (src_a >> (32 - shift))) & 0xFFFFFFFF
         elif alu_op == 15: # ROR A
-            shift = src_b & 0xF
-            return ((src_a >> shift) | (src_a << (16 - shift))) & 0xFFFF
+            shift = src_b & 0x1F
+            return ((src_a >> shift) | (src_a << (32 - shift))) & 0xFFFFFFFF
         else:
             return 0
 
     def mem_read(self, addr: int) -> int:
-        """Read 16-bit value from memory or MMIO."""
+        """Read 32-bit value from memory or MMIO."""
         addr &= 0xFFFF
 
+        # Check for kernel-only MMIO addresses (low memory)
+        if addr in (MMIO_SET_PROC_BASE, MMIO_SET_PROC_LIMIT):
+            if not self.privileged:
+                self.trap(TRAP_MEM_VIOLATION, addr)
+                return 0
+            return self.mmio_read(addr)
+
+        # Check for high MMIO addresses (user and kernel)
+        if addr >= 0xFF00:
+            if not self.privileged:
+                # User cannot read from ANY MMIO
+                self.trap(TRAP_MEM_VIOLATION, addr)
+                return 0
+            else:
+                # Kernel can read from all MMIO
+                return self.mmio_read(addr)
+
+        # Non-MMIO: apply address translation for user mode
         target_addr = addr
         if not self.privileged:
             target_addr = (addr + self.process_mem_base) & 0xFFFF
 
+        # Check memory bounds
+        if not self.privileged:
             if target_addr < self.kernel_size:
                  self.trap(TRAP_MEM_VIOLATION, target_addr)
                  return 0
 
-            if target_addr >= self.process_mem_limit and target_addr < MMIO_BASE:
+            if target_addr >= self.process_mem_limit:
                  self.trap(TRAP_MEM_VIOLATION, target_addr)
                  return 0
 
-            if target_addr >= MMIO_BASE:
-                 self.trap(TRAP_MMIO_READ, target_addr)
-                 return 0
-        else:
-             if target_addr >= MMIO_BASE:
-                 return self.mmio_read(target_addr)
-
-        if target_addr + 1 >= self.memory_size:
+        if target_addr + 3 >= self.memory_size:
             return 0
-        return self.memory[target_addr] | (self.memory[target_addr + 1] << 8)
+        return (self.memory[target_addr] |
+                (self.memory[target_addr + 1] << 8) |
+                (self.memory[target_addr + 2] << 16) |
+                (self.memory[target_addr + 3] << 24))
 
     def mem_write(self, addr: int, value: int):
-        """Write 16-bit value to memory or MMIO."""
+        """Write 32-bit value to memory or MMIO."""
         addr &= 0xFFFF
-        value &= 0xFFFF
+        value &= 0xFFFFFFFF
 
+        # Check for kernel-only MMIO addresses (low memory)
+        if addr in (MMIO_SET_PROC_BASE, MMIO_SET_PROC_LIMIT):
+            if not self.privileged:
+                self.trap(TRAP_MEM_VIOLATION, addr, value)
+                return
+            self.mmio_write(addr, value)
+            return
+
+        # Check for high MMIO addresses (user and kernel)
+        if addr >= 0xFF00:
+            if not self.privileged:
+                # User can ONLY access MMIO_SYSCALL, nothing else
+                if addr == MMIO_SYSCALL:
+                    self.trap(TRAP_SYSCALL, addr, value)
+                    return
+                else:
+                    # Block all other MMIO access from user code
+                    self.trap(TRAP_MEM_VIOLATION, addr, value)
+                    return
+            else:
+                # Kernel can write to all MMIO
+                self.mmio_write(addr, value)
+                return
+
+        # Non-MMIO: apply address translation for user mode
         target_addr = addr
         if not self.privileged:
             target_addr = (addr + self.process_mem_base) & 0xFFFF
 
+        # Check memory bounds
+        if not self.privileged:
             if target_addr < self.kernel_size:
                 self.trap(TRAP_MEM_VIOLATION, target_addr, value)
                 return
-
-            if target_addr >= self.process_mem_limit and target_addr < MMIO_BASE:
+            
+            if target_addr >= self.process_mem_limit:
                 self.trap(TRAP_MEM_VIOLATION, target_addr, value)
                 return
 
-            if target_addr >= MMIO_BASE:
-                self.trap(TRAP_MMIO_WRITE, target_addr, value)
-                return
-        else:
-            if target_addr >= MMIO_BASE:
-                self.mmio_write(target_addr, value)
-                return
-
-        if target_addr + 1 >= self.memory_size:
+        if target_addr + 3 >= self.memory_size:
             return
 
         self.memory[target_addr] = value & 0xFF
         self.memory[target_addr + 1] = (value >> 8) & 0xFF
+        self.memory[target_addr + 2] = (value >> 16) & 0xFF
+        self.memory[target_addr + 3] = (value >> 24) & 0xFF
 
     def mmio_read(self, addr: int) -> int:
         """Handle memory-mapped I/O reads. Requires privileged mode."""
@@ -523,7 +632,12 @@ class VM:
             return (self.cycles >> 16) & 0xFFFF
 
         elif addr == MMIO_RANDOM:
-            return random.randint(0, 0xFFFF)
+            return random.randint(0, 0xFFFFFFFF) & 0xFFFFFFFF
+
+        elif addr == MMIO_TIME:
+            # Return current time as 32-bit float (seconds since epoch)
+            current_time = time.time()
+            return float_to_u32(current_time)
 
         elif addr == MMIO_FILE_SIZE:
             # Get file size - handle in R1
@@ -601,7 +715,7 @@ class VM:
     def mmio_write(self, addr: int, value: int):
         """Handle memory-mapped I/O writes. Requires privileged mode."""
         if self.debug:
-            print(f'[MMIO/write] addr=0x{addr:04X} value=0x{value:04X}')
+            print(f'[MMIO/write] addr=0x{addr:04X} value=0x{value:08X}')
 
         if not self.privileged:
             # MMIO access denied in user mode - trigger trap
@@ -611,7 +725,8 @@ class VM:
         if addr == MMIO_PRINT_CHAR:
             # Print single character
             try:
-                print(f"DEBUG: CHAR {chr(value & 0xFF)}")
+                if self.debug:
+                    print(f"DEBUG: CHAR {chr(value & 0xFF)}")
                 sys.stdout.write(chr(value & 0xFF))
                 sys.stdout.flush()
             except:
@@ -619,14 +734,15 @@ class VM:
 
         elif addr == MMIO_PRINT_INT:
             # Print as decimal integer (signed)
-            if value & 0x8000:
-                value = value - 0x10000  # Convert to signed
+            value &= 0xFFFFFFFF
+            if value & 0x80000000:
+                value = value - 0x100000000
             sys.stdout.write(str(value))
             sys.stdout.flush()
 
         elif addr == MMIO_PRINT_HEX:
             # Print as hex
-            sys.stdout.write(f"{value:04X}")
+            sys.stdout.write(f"{value & 0xFFFFFFFF:08X}")
             sys.stdout.flush()
 
         elif addr == MMIO_PRINT_STR:
@@ -700,11 +816,11 @@ class VM:
             self.exit_code = value
             self.halted = True
 
-        elif addr == 0x002C: # MMIO_SCREEN_CLEAR
+        elif addr == MMIO_SCREEN_CLEAR:
             # Clear screen (ANSI escape)
             sys.stdout.write('\033[2J\033[H')
 
-        elif addr == 0x002E: # MMIO_FLUSH
+        elif addr == MMIO_FLUSH:
             sys.stdout.flush()
 
         elif addr == MMIO_FILE_OPEN:
@@ -731,19 +847,32 @@ class VM:
 
             path = ''.join(path_chars)
             try:
-                f = open(path, 'rb')
-                # If it's a .bin file, decompress it and provide a BytesIO wrapper
                 if path.endswith('.bin'):
-                    compressed_data = f.read()
-                    f.close()
+                    # For executable blobs, expose a flat image (code bytes + data)
+                    # so the kernel loader can copy directly into user memory.
+                    with open(path, 'rb') as raw_file:
+                        file_data = raw_file.read()
+
                     try:
                         from zstd import decompress
-                        from io import BytesIO
-                        decompressed_data = decompress(compressed_data)
-                        f = BytesIO(decompressed_data)
+                        file_data = decompress(file_data)
                     except:
-                        # If decompression fails, try reading as-is
-                        f = open(path, 'rb')
+                        pass
+
+                    try:
+                        exe = Executable.decode(file_data)
+                        file_data = b''.join(op.encode() for op in exe.code) + exe.data
+                    except:
+                        pass
+
+                    from io import BytesIO
+                    f = BytesIO(file_data)
+                else:
+                    f = open(path, 'rb')
+
+                if path.endswith('.bin'):
+                    pass
+
                 handle = self.next_handle
                 self.next_handle += 1
                 self.file_handles[handle] = f
@@ -771,20 +900,8 @@ class VM:
                 try:
                     data = self.file_handles[handle].read(length)
                     if self.debug: print(f"DEBUG: READ data len={len(data)} first bytes={data[:4].hex()}")
-                    # Write using mem_write to enforce protection
-                    for i, b in enumerate(data):
-                        if buf_addr + i < self.memory_size:
-                            addr = buf_addr + i
-                            if addr % 2 == 0:
-                                # Even address - modify low byte
-                                word = self.mem_read(addr) if addr + 1 < self.memory_size else 0
-                                word = (word & 0xFF00) | b
-                                self.mem_write(addr, word)
-                            else:
-                                # Odd address - modify high byte of previous word
-                                word = self.mem_read(addr - 1)
-                                word = (word & 0x00FF) | (b << 8)
-                                self.mem_write(addr - 1, word)
+                    end = buf_addr + len(data)
+                    self.memory[buf_addr:end] = data
                     self.regs[0] = len(data)
                 except:
                     self.regs[0] = 0xFFFF
@@ -1116,9 +1233,12 @@ class VM:
                 addr = self.regs[op.src_a]
 
             mem_data = self.mem_read(addr)
+            if self.trap_taken:
+                self.trap_taken = False
+                return
             result ^= mem_data
 
-        result &= 0xFFFF
+        result &= 0xFFFFFFFF
 
         # Memory write consumes RESULT
         if op.mem_en and op.mem_rw:
@@ -1129,6 +1249,9 @@ class VM:
                 # Indirect addressing: Address from register
                 addr = self.regs[op.src_a]
             self.mem_write(addr, result)
+            if self.trap_taken:
+                self.trap_taken = False
+                return
 
         # Update destination register
         if op.dst != 0 or op.dst_en:
@@ -1142,11 +1265,12 @@ class VM:
         if op.pc_we:
             new_pc = result
             # Check for privilege escalation (unless clear_priv was requested)
-            if new_pc < self.kernel_size and not op.clear_priv:
-                self.privileged = True
-                # Reset process memory bounds to allow full kernel access
-                self.process_mem_base = 0x0000
-                self.process_mem_limit = 0x10000
+            if not op.clear_priv:
+                # In user mode, PC is a logical address and must be translated
+                # before checking whether the jump targets kernel memory.
+                phys_new_pc = new_pc if self.privileged else ((new_pc + self.process_mem_base) & 0xFFFF)
+                if phys_new_pc < self.kernel_size and not self.privileged:
+                    self.privileged = True
             self.pc = new_pc
         else:
             self.pc += pc_inc
@@ -1270,6 +1394,15 @@ def main():
 
     # Pass all remaining arguments to kernel
     vm.args = args.kernel_args
+
+    # Convenience: treat extra arguments after the program path as pre-typed input.
+    # This keeps interactive tools usable while allowing one-shot invocations like:
+    #   vm.py kernel.bin calculator.bin "10*20"
+    if len(vm.args) > 1:
+        prefilled_input = ' '.join(vm.args[1:])
+        for ch in prefilled_input:
+            vm.kb_queue.append(ord(ch) & 0xFF)
+        vm.kb_queue.append(ord('\n'))
 
     # Load kernel into memory
     vm.load(exe)

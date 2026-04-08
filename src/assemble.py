@@ -38,73 +38,76 @@ Micro-op syntax (raw micro-op control):
 
 import sys
 import os
-import re
-from typing import Dict, List, Tuple, Optional, Set, Any
+from typing import Dict, List, Tuple, Set, Any
 from executable import Executable, MicroOp, ALU_OPS, REGISTERS
 
-# Standard MMIO Constants - Mapped at 0x0000
+# Standard MMIO Constants
 MMIO_CONSTANTS = {
-    'MMIO_BASE': 0x0000,
+    'MMIO_BASE': 0xFF00,
     # Character I/O
-    'MMIO_PRINT_CHAR': 0x0000,
-    'MMIO_PRINT_INT': 0x0002,
-    'MMIO_PRINT_HEX': 0x0004,
-    'MMIO_PRINT_STR': 0x0006,
-    'MMIO_INPUT_CHAR': 0x0008,
-    'MMIO_INPUT_READY': 0x000A,
-    'MMIO_INPUT_LINE': 0x000C,
-    'MMIO_NEWLINE': 0x000E,
+    'MMIO_PRINT_CHAR': 0xFF00,
+    'MMIO_PRINT_INT': 0xFF02,
+    'MMIO_PRINT_HEX': 0xFF04,
+    'MMIO_PRINT_STR': 0xFF06,
+    'MMIO_INPUT_CHAR': 0xFF08,
+    'MMIO_INPUT_READY': 0xFF0A,
+    'MMIO_INPUT_LINE': 0xFF0C,
+    'MMIO_NEWLINE': 0xFF0E,
     
     # Timer
-    'MMIO_TIMER_LO': 0x0010,
-    'MMIO_TIMER_HI': 0x0012,
-    'MMIO_TIMER_INTERVAL': 0x0014,
-    'MMIO_RANDOM': 0x0016,
-    'MMIO_EXIT': 0x0018,
-    'MMIO_SCREEN_CLEAR': 0x001C,
-    'MMIO_FLUSH': 0x001E,
+    'MMIO_TIMER_LO': 0xFF10,
+    'MMIO_TIMER_HI': 0xFF12,
+    'MMIO_TIMER_INTERVAL': 0xFF36,
+    'MMIO_RANDOM': 0xFF14,
+    'MMIO_EXIT': 0xFF18,
+    'MMIO_TIME': 0xFF1A,
+    'MMIO_SCREEN_CLEAR': 0xFF1C,
+    'MMIO_FLUSH': 0xFF1E,
 
     # File I/O
-    'MMIO_FILE_OPEN': 0x0020,
-    'MMIO_FILE_READ': 0x0022,
-    'MMIO_FILE_CLOSE': 0x0024,
-    'MMIO_FILE_SIZE': 0x0026,
-    'MMIO_FILE_SEEK': 0x0028,
+    'MMIO_FILE_OPEN': 0xFF20,
+    'MMIO_FILE_READ': 0xFF22,
+    'MMIO_FILE_CLOSE': 0xFF24,
+    'MMIO_FILE_SIZE': 0xFF26,
+    'MMIO_FILE_SEEK': 0xFF28,
 
     # Arguments
-    'MMIO_ARG_COUNT': 0x0030,
-    'MMIO_ARG_LEN': 0x0032,
-    'MMIO_ARG_COPY': 0x0034,
+    'MMIO_ARG_COUNT': 0xFF30,
+    'MMIO_ARG_LEN': 0xFF32,
+    'MMIO_ARG_COPY': 0xFF34,
 
     # Screen (80x25 text mode)
-    'MMIO_SCREEN_WIDTH': 0x0040,
-    'MMIO_SCREEN_HEIGHT': 0x0042,
-    'MMIO_SCREEN_PUTC': 0x0044,
-    'MMIO_SCREEN_SETXY': 0x0046,
-    'MMIO_SCREEN_FLUSH': 0x0048,
-    'MMIO_SCREEN_GETC': 0x004A,
-    'MMIO_SCREEN_BUF': 0x004C,
+    'MMIO_SCREEN_WIDTH': 0xFF40,
+    'MMIO_SCREEN_HEIGHT': 0xFF42,
+    'MMIO_SCREEN_PUTC': 0xFF44,
+    'MMIO_SCREEN_SETXY': 0xFF46,
+    'MMIO_SCREEN_FLUSH': 0xFF48,
+    'MMIO_SCREEN_GETC': 0xFF4A,
+    'MMIO_SCREEN_BUF': 0xFF4C,
 
     # Keyboard / Mouse
-    'MMIO_KB_AVAILABLE': 0x0050,
-    'MMIO_KB_READ': 0x0052,
-    'MMIO_KB_MODIFIERS': 0x0054,
-    'MMIO_MOUSE_X': 0x0060,
-    'MMIO_MOUSE_Y': 0x0062,
-    'MMIO_MOUSE_BUTTONS': 0x0064,
-    'MMIO_MOUSE_WHEEL': 0x0066,
+    'MMIO_KB_AVAILABLE': 0xFF50,
+    'MMIO_KB_READ': 0xFF52,
+    'MMIO_KB_MODIFIERS': 0xFF54,
+    'MMIO_MOUSE_X': 0xFF60,
+    'MMIO_MOUSE_Y': 0xFF62,
+    'MMIO_MOUSE_BUTTONS': 0xFF64,
+    'MMIO_MOUSE_WHEEL': 0xFF66,
 
     # Process Control
-    'MMIO_SET_PROC_BASE': 0x0070,
-    'MMIO_SET_PROC_LIMIT': 0x0072,
+    'MMIO_SET_PROC_BASE': 0xFF3C,
+    'MMIO_SET_PROC_LIMIT': 0xFF3E,
+    
+    # Syscalls
+    'MMIO_SYSCALL': 0xFF80,
     
     # Kernel / Trap Constants (Not MMIO, but useful)
     'TRAP_VECTOR': 0x0100,
-    'TRAP_INFO_CAUSE': 0x0080,
-    'TRAP_INFO_ADDR': 0x0082,
-    'TRAP_INFO_PC': 0x0084,
-    'TRAP_INFO_VALUE': 0x0086,
-    'USER_REGS_ADDR': 0x0090,
+    'TRAP_INFO_CAUSE': 0x0010,
+    'TRAP_INFO_ADDR': 0x0014,
+    'TRAP_INFO_PC': 0x0018,
+    'TRAP_INFO_VALUE': 0x001C,
+    'USER_REGS_ADDR': 0x0060,
 }
 
 
@@ -123,6 +126,7 @@ class Assembler:
     def __init__(self):
         self.labels: Dict[str, int] = MMIO_CONSTANTS.copy()
         self.data_labels: Dict[str, int] = {}  # Labels in data section (label -> offset in data)
+        self.defines: Dict[str, str] = {}  # Macro definitions (#define NAME value)
         self.code: List[MicroOp] = []
         self.data: bytes = b''
         self.unresolved: List[Tuple[int, str, int, str]] = []  # (addr, label, line_num, line)
@@ -135,11 +139,19 @@ class Assembler:
         self.source_dir = ""  # Directory of main source file for relative includes
         self.pending_data_label = None  # Label to assign to next data directive
         self.auto_kernel_size = False  # Whether to automatically determine kernel size
+        self.kernel_section_start_idx = None  # Index in code array where kernel section begins
         self.deferred_includes: List[str] = []
 
     def error(self, message: str):
         """Raise an assembler error."""
         raise AssemblerError(message, self.line_num, self.current_line)
+
+    def expand_macros(self, token: str) -> str:
+        """Expand macro definitions in a token."""
+        # Check if the whole token is a defined macro
+        if token in self.defines:
+            return self.defines[token]
+        return token
 
     def split_operands(self, operand_str: str) -> List[str]:
         """Split operand string by comma, respecting quoted strings."""
@@ -183,6 +195,9 @@ class Assembler:
         token = token.strip()
         if token.startswith('#'):
             token = token[1:]
+
+        # Expand macros
+        token = self.expand_macros(token)
 
         # Check for character literal first to avoid splitting '+' inside quotes
         if token.startswith("'") and token.endswith("'") and len(token) == 3:
@@ -414,7 +429,7 @@ class Assembler:
     def assemble_unary(self, mnemonic: str, operands: List[str]):
         """Assemble unary instructions (inc, dec)."""
         alu_map = {'inc': 'INC', 'dec': 'DEC'}
-        alu_name = alu_map.get(mnemonic)
+        alu_name = alu_map[mnemonic]
 
         if len(operands) == 1:
             # inc rd -> inc rd, rd
@@ -654,39 +669,28 @@ class Assembler:
         self.emit(MicroOp(alu_op=ALU_OPS['SEL_A'], src_a=7, pc_we=True))
 
     def assemble_syscall(self, operands: List[str]):
-        """Assemble syscall instruction."""
+        """Assemble syscall instruction - triggers trap via MMIO write."""
         if operands:
             self.error("syscall takes no operands")
 
-        # Syscall takes 6 micro-ops to properly save a 16-bit return address
-        # Each micro-op is 4 bytes, so advance by 24 bytes to land after the sequence
-        return_addr = self.current_addr() + 24
-        high_byte = (return_addr >> 8) & 0xFF
-        low_byte = return_addr & 0xFF
-
-        # Build 16-bit return address in R7:
-        # 1. R7 = high_byte
-        self.emit(MicroOp(alu_op=ALU_OPS['PASS'], dst=7, imm=high_byte, dst_en=True))
-        # 2. R5 = 8 (shift amount, using R5 as temp)
-        self.emit(MicroOp(alu_op=ALU_OPS['PASS'], dst=5, imm=8, dst_en=True))
-        # 3. R7 = R7 << R5 (R7 = high_byte << 8)
-        self.emit(MicroOp(alu_op=ALU_OPS['SHL'], dst=7, src_a=7, src_b=5, dst_en=True))
-        # 4. R7 = R7 | low_byte (NOTE: src_b must be same as src_a to avoid XOR bus issues!)
-        self.emit(MicroOp(alu_op=ALU_OPS['OR'], dst=7, src_a=7, src_b=7, imm=low_byte, dst_en=True))
-        # 5. Jump to address 0 (kernel entry)
-        self.emit(MicroOp(pc_we=True, imm=0))
-        # Padding NOP to align to 6 ops (in case we miscounted)
-        self.emit_nop()
+        # Syscall implementation: Write R1 (syscall number) to MMIO_SYSCALL address
+        # This triggers TRAP_SYSCALL which kernel handles securely
+        # Assumptions: R1 contains syscall number, R0-R2 have args
+        
+        # Load MMIO_SYSCALL address (0xFF80) into R0
+        self.emit(MicroOp(alu_op=ALU_OPS['PASS'], dst=0, imm=0xFF80, dst_en=True, imm16=True))
+        # Write R1 (syscall number) to [R0] - this triggers TRAP_SYSCALL
+        self.emit(MicroOp(mem_en=True, mem_rw=True, src_a=0, src_b=1))
 
     def assemble_retk(self, operands: List[str]):
         """Assemble kernel return instruction (retk).
-           Restores PC from TRAP_INFO_PC (0x0014) and clears privilege.
+           Restores PC from TRAP_INFO_PC (0x0018) and clears privilege.
            Does NOT clobber any registers (uses direct memory addressing).
         """
         if operands:
             self.error("retk takes no operands")
 
-        # jmp [0x0014] (Load into PC) + clear_priv
+        # jmp [0x0018] (Load into PC) + clear_priv
         # Direct addressing using IMM as address (xor_imm=False)
         self.emit(MicroOp(
             mem_en=True, 
@@ -694,7 +698,7 @@ class Assembler:
             pc_we=True, 
             clear_priv=True,
             xor_imm=False,
-            imm=0x14
+            imm=0x18
         ))
 
     def assemble_halt(self, operands: List[str]):
@@ -750,7 +754,9 @@ class Assembler:
         if src_type != 'reg':
             self.error("Operand must be a register")
 
-        # Decrement R6 (stack pointer) by 2 (16-bit values need 2 bytes)
+        # Decrement R6 (stack pointer) by 4 to avoid overlap with 32-bit memory ops.
+        self.emit(MicroOp(alu_op=ALU_OPS['DEC'], dst=6, src_a=6))
+        self.emit(MicroOp(alu_op=ALU_OPS['DEC'], dst=6, src_a=6))
         self.emit(MicroOp(alu_op=ALU_OPS['DEC'], dst=6, src_a=6))
         self.emit(MicroOp(alu_op=ALU_OPS['DEC'], dst=6, src_a=6))
 
@@ -770,7 +776,9 @@ class Assembler:
         # Load from memory [R6] -> dst_reg
         # Memory reads use src_a for address
         self.emit_with_dst(dst, src_a=6, mem_en=True, mem_rw=False)
-        # Increment R6 (stack pointer) by 2 (16-bit values need 2 bytes)
+        # Increment R6 (stack pointer) by 4 to match push layout.
+        self.emit(MicroOp(alu_op=ALU_OPS['INC'], dst=6, src_a=6))
+        self.emit(MicroOp(alu_op=ALU_OPS['INC'], dst=6, src_a=6))
         self.emit(MicroOp(alu_op=ALU_OPS['INC'], dst=6, src_a=6))
         self.emit(MicroOp(alu_op=ALU_OPS['INC'], dst=6, src_a=6))
 
@@ -832,7 +840,7 @@ class Assembler:
         """Assemble leab instruction: leab rd, label (load byte address of data label into register).
 
         This is for loading addresses of data (strings, bytes, words) in the data section.
-        The address is computed as: (base_addr + code_length) * 4 + data_offset
+        The address is computed as: (base_addr + code_length) + data_offset
         """
         if len(operands) != 2:
             self.error("leab requires 2 operands: leab rd, label")
@@ -850,8 +858,8 @@ class Assembler:
         leab_idx = len(self.code)
 
         # Emit placeholder ops:
-        # 1. dst = high_byte
-        self.emit(MicroOp(alu_op=ALU_OPS['PASS'], dst=dst, imm=0))
+        # 1. dst = high_byte (with imm16 flag for proper 16-bit loading)
+        self.emit(MicroOp(alu_op=ALU_OPS['PASS'], dst=dst, imm=0, imm16=True))
         # 2. R5 = 8 (shift amount) - use R5 as temp
         self.emit(MicroOp(alu_op=ALU_OPS['PASS'], dst=5, imm=8))
         # 3. dst = dst << R5
@@ -985,7 +993,14 @@ class Assembler:
             # This also sets the entry point unless explicitly overridden with .entry
             if len(operands) != 1:
                 self.error(".base requires 1 operand")
-            self.base_addr = self.parse_immediate(operands[0])
+            
+            new_base = self.parse_immediate(operands[0])
+            
+            # Track when kernel section starts (base 0x0100)
+            if new_base == 0x0100 and self.base_addr != 0x0100:
+                self.kernel_section_start_idx = len(self.code)
+            
+            self.base_addr = new_base
             # Set entry point to base address (first instruction)
             self.entry_point = self.base_addr
 
@@ -1045,6 +1060,7 @@ class Assembler:
             self.data += s.encode('latin-1') + b'\x00'
 
         elif directive == '.include':
+            # Legacy .include support (renamed to #include)
             # Include another assembly file - defer to end
             if len(operands) != 1:
                 self.error(".include requires 1 operand (filename)")
@@ -1053,6 +1069,23 @@ class Assembler:
                 filename = filename[1:-1]
             # Defer processing
             self.deferred_includes.append(filename)
+
+        elif directive == '#include':
+            # New #include support
+            if len(operands) != 1:
+                self.error("#include requires 1 operand (filename)")
+            filename = operands[0].strip()
+            if (filename.startswith('"') and filename.endswith('"')) or (filename.startswith("'") and filename.endswith("'")):
+                filename = filename[1:-1]
+            self.deferred_includes.append(filename)
+
+        elif directive == '#define':
+            # #define macro support
+            if len(operands) < 2:
+                self.error("#define requires NAME and VALUE: #define NAME VALUE")
+            name = operands[0]
+            value = ' '.join(operands[1:])  # Everything after name is the value
+            self.defines[name] = value
 
         else:
             self.error(f"Unknown directive: {directive}")
@@ -1107,6 +1140,27 @@ class Assembler:
 
         line = line.strip()
         if not line:
+            return
+
+        # Handle #define preprocessing directive
+        if line.startswith('#define'):
+            parts = line.split(None, 2)  # Split into at most 3 parts: #define, name, value
+            if len(parts) < 3:
+                self.error("#define requires NAME and VALUE: #define NAME VALUE")
+            name = parts[1]
+            value = parts[2]
+            self.defines[name] = value
+            return
+
+        # Handle #include preprocessing directive
+        if line.startswith('#include'):
+            parts = line.split(None, 1)
+            if len(parts) < 2:
+                self.error("#include requires filename: #include \"file.asm\"")
+            filename = parts[1].strip()
+            if (filename.startswith('"') and filename.endswith('"')) or (filename.startswith("'") and filename.endswith("'")):
+                filename = filename[1:-1]
+            self.deferred_includes.append(filename)
             return
 
         # Check for label (but not if colon is inside quotes)
@@ -1225,12 +1279,14 @@ class Assembler:
             self.error(f"Unknown instruction: {mnemonic}")
 
     def resolve_labels(self):
-        """Resolve unresolved label references."""
-        # Calculate base byte address for data section
-        # Data starts after all code
-        code_byte_size = sum(op.size() for op in self.code)
-        data_base_addr = self.base_addr + code_byte_size
-
+        """Resolve unresolved label references in two phases.
+        
+        Phase 1: Resolve code labels (lea, jmp16, call16, etc) - these don't depend on data positions
+        Phase 2: Calculate final code_byte_size, then resolve data labels (leab) which depend on it
+        """
+        # PHASE 1: Resolve all code labels first (these don't depend on data_base_addr)
+        data_label_refs = []  # Store leab references for phase 2
+        
         for code_idx, label, line_num, line in self.unresolved:
             # Check for lea instruction (special format)
             if label.startswith('__lea__'):
@@ -1249,22 +1305,9 @@ class Assembler:
                 self.code[code_idx + 3].imm = low_byte
 
             # Check for leab instruction (load byte address for data)
+            # DEFER THIS TO PHASE 2
             elif label.startswith('__leab__'):
-                actual_label = label[8:]  # Remove __leab__ prefix
-                if actual_label not in self.data_labels:
-                    raise AssemblerError(f"Undefined data label: {actual_label}", line_num, line)
-
-                # Compute byte address: data_base + offset_in_data
-                data_offset = self.data_labels[actual_label]
-                target_addr = data_base_addr + data_offset
-                high_byte = (target_addr >> 8) & 0xFF
-                low_byte = target_addr & 0xFF
-
-                # Update the leab instructions (same format as lea):
-                # code_idx+0: PASS with high_byte
-                # code_idx+3: OR with low_byte
-                self.code[code_idx].imm = high_byte
-                self.code[code_idx + 3].imm = low_byte
+                data_label_refs.append((code_idx, label, line_num, line))
 
             elif label.startswith('__jmp16imm__'):
                 # Format: __jmp16imm__<mnemonic>__<label>
@@ -1281,7 +1324,6 @@ class Assembler:
             elif label.startswith('__jmp16__'):
                 # Format: __jmp16__<mnemonic>__<label>
                 parts = label.split('__')
-                # parts = ['', 'jmp16', '<mnemonic>', '<label>']
                 actual_label = parts[3]
                 if actual_label not in self.labels:
                     raise AssemblerError(f"Undefined label: {actual_label}", line_num, line)
@@ -1289,54 +1331,64 @@ class Assembler:
                 target_addr = self.labels[actual_label]
                 high_byte = (target_addr >> 8) & 0xFF
                 low_byte = target_addr & 0xFF
-                # Update the 16-bit jump instructions:
-                # code_idx+0: PASS with high_byte
-                # code_idx+3: OR with low_byte
                 self.code[code_idx].imm = high_byte
                 self.code[code_idx + 3].imm = low_byte
 
-            # Check for 16-bit call target (special format)
+            # Check for 16-bit call target
             elif label.startswith('__call16__'):
-                actual_label = label[10:]  # Remove __call16__ prefix
+                actual_label = label[10:]
                 if actual_label not in self.labels:
                     raise AssemblerError(f"Undefined label: {actual_label}", line_num, line)
 
                 target_addr = self.labels[actual_label]
                 high_byte = (target_addr >> 8) & 0xFF
                 low_byte = target_addr & 0xFF
+                self.code[code_idx].imm = high_byte
+                self.code[code_idx + 3].imm = low_byte
 
-                # Update the 16-bit call instructions:
-                # code_idx+0: PASS with high_byte
-                # code_idx+3: OR with low_byte
+            # Other label types that reference code addresses
+            else:
+                if label in self.labels:
+                    target_addr = self.labels[label]
+                    if self.code[code_idx].imm16:
+                        self.code[code_idx].imm = target_addr & 0xFFFF
+                    else:
+                        self.code[code_idx].imm = target_addr & 0xFF
+                elif label not in self.data_labels:
+                    # Defer data label resolution to phase 2
+                    data_label_refs.append((code_idx, label, line_num, line))
+
+        # PHASE 2: Now calculate code_byte_size after all instruction sizes are finalized
+        # and resolve data label references
+        code_byte_size = sum(op.size() for op in self.code)
+        data_base_addr = self.base_addr + code_byte_size
+
+        for code_idx, label, line_num, line in data_label_refs:
+            if label.startswith('__leab__'):
+                actual_label = label[8:]  # Remove __leab__ prefix
+                if actual_label not in self.data_labels:
+                    raise AssemblerError(f"Undefined data label: {actual_label}", line_num, line)
+
+                # Compute byte address: data_base + offset_in_data
+                data_offset = self.data_labels[actual_label]
+                target_addr = data_base_addr + data_offset
+                high_byte = (target_addr >> 8) & 0xFF
+                low_byte = target_addr & 0xFF
+
+                # Update the leab instructions
                 self.code[code_idx].imm = high_byte
                 self.code[code_idx + 3].imm = low_byte
 
             else:
-                target_addr = 0
-                if label in self.labels:
-                    target_addr = self.labels[label]
-                elif label in self.data_labels:
-                    # Data label: Address = Code End + Offset
+                # Data label reference
+                if label in self.data_labels:
                     target_addr = data_base_addr + self.data_labels[label]
+                    if self.code[code_idx].imm16:
+                        self.code[code_idx].imm = target_addr & 0xFFFF
+                    else:
+                        self.code[code_idx].imm = target_addr & 0xFF
                 else:
                     raise AssemblerError(f"Undefined label: {label}", line_num, line)
-
-                # Update the immediate field in the micro-op (use 8-bit or 16-bit?)
-                # If the opcode supports imm16 (PASS/MOV), we should update imm16 if needed?
-                # The existing code unconditionally sets .imm = target & 0xFF.
-                # If target_addr > 255, this truncates!
-                # But 'li' (movi) handles >255 by using imm16 path if value known?
-                # If value unknown (label), it might have generated a byte-only op?
-                # parse_operand -> movi -> emit MicroOp with imm16=True if needed?
-                # When emitting movi with label, we don't know the value yet.
-                # So we assume it fits? Or we force imm16 support?
-                
-                # Check if the instruction expects imm16
-                if self.code[code_idx].imm16:
-                     self.code[code_idx].imm = target_addr & 0xFFFF
-                else:
-                     self.code[code_idx].imm = target_addr & 0xFF
-
 
         # Resolve entry point if it's a label
         if isinstance(self.entry_point, str):
@@ -1349,6 +1401,7 @@ class Assembler:
         self.code = []
         self.labels = MMIO_CONSTANTS.copy()
         self.data_labels = {}
+        self.defines = {}  # Reset macro definitions
         self.unresolved = []
         self.data = b''
         self.entry_point = 0
@@ -1384,9 +1437,14 @@ class Assembler:
 
         # Determine kernel size if auto
         if self.auto_kernel_size:
-            # Kernel size is the size of the code section
-            # Assuming code starts at base_addr (usually 0 for kernel)
-            self.kernel_size = self.current_addr() - self.base_addr
+            # Kernel size is the byte size of just the kernel code section
+            if self.kernel_section_start_idx is not None:
+                # Sum only the sizes of kernel micro-ops
+                kernel_ops = self.code[self.kernel_section_start_idx:]
+                self.kernel_size = sum(op.size() for op in kernel_ops)
+            else:
+                # No kernel section found, size is all code
+                self.kernel_size = self.current_addr() - self.base_addr
             
         exe = Executable()
         exe.entry_point = self.entry_point

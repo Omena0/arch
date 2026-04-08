@@ -28,8 +28,7 @@ Extended flags (byte 3):
   7     IMM16       1=16-bit immediate (instruction is 6 bytes)
 """
 
-from zstd import compress, decompress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List
 import struct
 
@@ -215,8 +214,8 @@ class Executable:
     """Represents an executable binary."""
     entry_point: int = 0
     kernel_size: int = 0x8000  # Default kernel region size
-    code: List[MicroOp] = None
-    data: bytes = b''
+    code: List[MicroOp] = field(default_factory=list)
+    data: bytes = field(default_factory=bytes)
     is_kernel: bool = False
 
     def __post_init__(self):
@@ -253,12 +252,11 @@ class Executable:
 
         data = header + code_bytes + self.data
 
-        return compress(data, 22)
+        return data
 
     @classmethod
     def decode(cls, data: bytes) -> 'Executable':
         """Decode bytes to executable."""
-        data = decompress(data)
 
         if len(data) < 22:
             raise ValueError("Data too short for executable header")
